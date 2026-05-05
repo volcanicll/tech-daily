@@ -20,6 +20,9 @@ const contentModules = {
   // Agent Code 资讯模块 (默认启用)
   agentCode: process.env.MODULE_AGENT_CODE !== "false",
 
+  // Horizon 科技雷达模块 (默认启用，AI精选HN/Reddit/RSS/GitHub)
+  horizon: process.env.MODULE_HORIZON !== "false",
+
   // V2EX 日报模块 (默认启用)
   v2ex: process.env.MODULE_V2EX !== "false",
 
