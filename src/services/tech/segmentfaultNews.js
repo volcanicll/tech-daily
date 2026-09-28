@@ -2,7 +2,7 @@ const HttpClient = require("../../utils/http");
 const http = new HttpClient();
 const cheerio = require("cheerio");
 const { translateBatch } = require("../../utils/translation");
-const { filterTodayItems } = require("../../utils/common");
+const { filterRecentItems } = require("../../utils/common");
 
 /**
  * SegmentFault 技术问答社区配置
@@ -20,14 +20,89 @@ const SEGMENTFAULT_CONFIG = {
     // 技术频道
     channels: "/channels",
   },
-  // RSS源
-  rss: {
-    hot: "https://segmentfault.com/questions/hot/rss",
-    recent: "https://segmentfault.com/questions/recent/rss",
-    articles: "https://segmentfault.com/articles/hot/rss",
+  // 订阅源。原先的 /questions/hot/rss 与 /articles/hot/rss 已 404，
+  // 页面路径 /questions/hot、/articles/hot 也一并 404；
+  // 目前只有 /feeds/questions 可用，且它是 Atom 格式而不是 RSS。
+  feeds: {
+    questions: "https://segmentfault.com/feeds/questions",
+    articles: "", // 文章源已下线，留空则跳过
   },
   topN: 10,
 };
+
+/**
+ * 解析订阅源 XML，同时兼容 RSS 与 Atom
+ *
+ * 两者的差别不只是标签名：RSS 的链接是元素文本，Atom 的链接在 href 属性上。
+ * 只按 RSS 解析 Atom 源会拿到 0 条 —— 而且不报错，看起来像"源里没内容"。
+ *
+ * @param {string} xml - 订阅源原文
+ * @returns {Array}
+ */
+function parseFeedXml(xml) {
+  const $ = cheerio.load(xml, { xmlMode: true });
+
+  // RSS 用 <item>，Atom 用 <entry>
+  const nodes = $("item").length > 0 ? $("item") : $("entry");
+  const items = [];
+
+  nodes.each((i, el) => {
+    if (i >= 20) return false;
+
+    const $el = $(el);
+    const title = $el.find("title").first().text().trim();
+
+    // RSS：<link>https://…</link>；Atom：<link href="https://…" />
+    let link = $el.find("link").first().text().trim();
+    if (!link) {
+      link =
+        $el.find("link").first().attr("href") ||
+        $el.find("id").first().text().trim();
+    }
+
+    // 获取描述（RSS 是 description，Atom 是 summary/content）
+    let description =
+      $el.find("description").text() ||
+      $el.find("summary").text() ||
+      $el.find("content").text();
+
+    // 清理HTML
+    if (description) {
+      description = description.replace(/<[^>]*>?/gm, "").trim();
+      description = description.replace(/\s+/g, " ");
+      if (description.length > 200) {
+        description = description.substring(0, 197) + "...";
+      }
+    }
+
+    // 获取作者。Atom 是 <author><name>…</name><uri>…</uri></author>，
+    // 直接取 author 的文本会把 uri 也拼进来
+    const author =
+      $el.find("author name").first().text().trim() ||
+      $el.find("author").first().text().trim() ||
+      "Unknown";
+
+    // 获取发布时间（RSS 是 pubDate，Atom 是 published/updated）
+    const pubDate =
+      $el.find("pubDate").text().trim() ||
+      $el.find("published").text().trim() ||
+      $el.find("updated").text().trim();
+
+    if (title && link) {
+      items.push({
+        title,
+        url: link,
+        description: description || "",
+        author,
+        posted_on: pubDate
+          ? new Date(pubDate).toISOString()
+          : new Date().toISOString(),
+      });
+    }
+  });
+
+  return items;
+}
 
 /**
  * SegmentFault 客户端类
@@ -38,59 +113,19 @@ class SegmentFaultClient {
   }
 
   /**
-   * 获取 RSS 内容
-   * @param {string} url - RSS 源地址
+   * 拉取并解析订阅源
+   * @param {string} url - 订阅源地址
    * @returns {Promise<Array>}
    */
-  async fetchRSS(url) {
+  async fetchFeed(url) {
     const headers = {
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-      Accept: "application/rss+xml,application/xml,text/xml,*/*",
+      Accept:
+        "application/atom+xml,application/rss+xml,application/xml,text/xml,*/*",
     };
 
     const xml = await http.get(url, { headers });
-    const $ = cheerio.load(xml, { xmlMode: true });
-    const items = [];
-
-    $("item").each((i, el) => {
-      if (i >= 20) return false;
-
-      const $el = $(el);
-      const title = $el.find("title").text().trim();
-      let link = $el.find("link").text().trim();
-
-      // 获取描述
-      let description = $el.find("description").text();
-      if (!description) description = $el.find("summary").text();
-
-      // 清理HTML
-      if (description) {
-        description = description.replace(/<[^>]*>?/gm, "").trim();
-        description = description.replace(/\s+/g, " ");
-        if (description.length > 200) {
-          description = description.substring(0, 197) + "...";
-        }
-      }
-
-      // 获取作者
-      const author = $el.find("author").text().trim() || "Unknown";
-
-      // 获取发布时间
-      let pubDate = $el.find("pubDate").text().trim();
-      if (!pubDate) pubDate = $el.find("published").text().trim();
-
-      if (title && link) {
-        items.push({
-          title,
-          url: link,
-          description: description || "",
-          author,
-          posted_on: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
-        });
-      }
-    });
-
-    return items;
+    return parseFeedXml(xml);
   }
 
   /**
@@ -182,17 +217,22 @@ async function getSegmentFaultNews() {
 
   try {
     console.log("Fetching SegmentFault hot questions...");
-    
-    // 并行获取问题和文章
+
+    const { questions: questionsFeed, articles: articlesFeed } =
+      SEGMENTFAULT_CONFIG.feeds;
+
+    // 并行获取问题和文章（文章源已下线，留空则跳过）
     const [questions, articles] = await Promise.all([
-      client.fetchRSS(SEGMENTFAULT_CONFIG.rss.hot).catch(e => {
+      client.fetchFeed(questionsFeed).catch((e) => {
         console.error("SegmentFault questions fetch error:", e.message);
         return [];
       }),
-      client.fetchRSS(SEGMENTFAULT_CONFIG.rss.articles).catch(e => {
-        console.error("SegmentFault articles fetch error:", e.message);
-        return [];
-      }),
+      articlesFeed
+        ? client.fetchFeed(articlesFeed).catch((e) => {
+            console.error("SegmentFault articles fetch error:", e.message);
+            return [];
+          })
+        : Promise.resolve([]),
     ]);
 
     // 合并并分类
@@ -220,12 +260,15 @@ async function getSegmentFaultNews() {
       (item, translated) => { item.title = translated; }
     );
 
-    // 过滤只保留当天的内容
-    const todayItems = filterTodayItems(itemsToTranslate);
-    console.log(`SegmentFault: filtered to ${todayItems.length} items from today`);
+    // 过滤近期内容。这里用 7 天而不是默认的 24 小时：
+    // /feeds/questions 实际上是按热度排的榜单而非"最新"流，实测最新一条
+    // 也有 26 小时、中位数 19 天，套 24 小时窗口会把它整段清空。
+    // 问答站本身是低频的，7 天窗口才符合它的更新节奏。
+    const recentItems = filterRecentItems(itemsToTranslate, "posted_on", 7 * 24);
+    console.log(`SegmentFault: 7 天内 ${recentItems.length} 条`);
 
     // 取前N条
-    return todayItems.slice(0, SEGMENTFAULT_CONFIG.topN);
+    return recentItems.slice(0, SEGMENTFAULT_CONFIG.topN);
   } catch (error) {
     console.error("Error fetching SegmentFault news:", error.message);
     return [];
@@ -236,4 +279,5 @@ module.exports = {
   getSegmentFaultNews,
   SegmentFaultClient,
   SEGMENTFAULT_CONFIG,
+  parseFeedXml,
 };

@@ -3,3 +3,8 @@ node_modules
 vendor/horizon/
 .DS_Store
 dist/
+
+# 日报的"记忆"与归档：由 workflow 发布到 daily-data 分支，不进 main。
+# main 只保留源码，历史里不会出现每天一条的数据提交。
+state/
+docs/archive/

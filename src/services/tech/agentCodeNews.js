@@ -2,7 +2,7 @@ const HttpClient = require("../../utils/http");
 const http = new HttpClient();
 const cheerio = require("cheerio");
 const { translateBatch } = require("../../utils/translation");
-const { filterTodayItems } = require("../../utils/common");
+const { filterRecentItems } = require("../../utils/common");
 
 /**
  * Agent Code / Vibe Coding 相关 RSS 源
@@ -310,7 +310,7 @@ async function getAgentCodeNews() {
   const translatedNews = itemsToTranslate;
 
   // 过滤只保留当天的消息
-  const todayNews = filterTodayItems(translatedNews);
+  const todayNews = filterRecentItems(translatedNews);
   console.log(
     `Agent Code News: filtered to ${todayNews.length} items from today`,
   );

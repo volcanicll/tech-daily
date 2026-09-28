@@ -37,26 +37,30 @@ async function fetchWithRetry(fetchFn, retries = 3) {
 }
 
 /**
- * Filter items by date range
- * @param {Array} items - Array of items with date field
- * @param {string} dateField - Name of the date field (default: 'posted_on')
- * @param {number} daysRange - Number of days to include (default: 1 = today only)
- * @returns {Array} - Items within the date range
+ * 按时间窗筛选近期条目
+ *
+ * 用滚动时间窗，而不是"本地日历的今天 00:00 到现在"。后者有两个坑：
+ *   1. 窗口宽度取决于运行时刻 —— CI 在 UTC 06:00 跑，窗口只有 6 小时，
+ *      抓到 30 条也可能一条都留不下
+ *   2. 以运行机器的时区为准，CI 是 UTC，而中文源是 UTC+8：
+ *      "今天"从北京时间早上 8 点才开始算，当天 0~8 点的内容被整体排除
+ *
+ * 滚动窗口与时区、运行时刻都无关，行为可预期。
+ *
+ * @param {Array} items - 条目数组
+ * @param {string} dateField - 日期字段名
+ * @param {number} hoursWindow - 回溯小时数
+ * @returns {Array}
  */
-function filterTodayItems(items, dateField = "posted_on", daysRange = 1) {
-  const now = new Date();
-  const startDate = new Date();
-  startDate.setDate(now.getDate() - daysRange + 1);
-  startDate.setHours(0, 0, 0, 0);
+function filterRecentItems(items, dateField = "posted_on", hoursWindow = 24) {
+  const now = Date.now();
+  const cutoff = now - hoursWindow * 60 * 60 * 1000;
 
   return items.filter((item) => {
-    try {
-      const itemDate = new Date(item[dateField]);
-      return itemDate >= startDate && itemDate <= now;
-    } catch {
-      return false;
-    }
+    const timestamp = new Date(item?.[dateField]).getTime();
+    // 无法解析的时间一律丢弃，避免 NaN 比较恒为 false 造成"静默全丢"
+    return Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= now;
   });
 }
 
-module.exports = { translateToChinese, fetchWithRetry, filterTodayItems };
+module.exports = { translateToChinese, fetchWithRetry, filterRecentItems };

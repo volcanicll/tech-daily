@@ -7,7 +7,7 @@
 const HttpClient = require("../../utils/http");
 const http = new HttpClient();
 const { env } = require("../../config/env");
-const { translateToChinese, filterTodayItems } = require("../../utils/common");
+const { translateToChinese, filterRecentItems } = require("../../utils/common");
 
 // RapidAPI Twitter API45 配置
 const TWITTER_API_HOST = "twitter-api45.p.rapidapi.com";
@@ -212,7 +212,7 @@ async function getXTwitterNews() {
   );
 
   // 过滤保留一周内的消息
-  const recentTweets = filterTodayItems(qualityTweets, "posted_on", 7);
+  const recentTweets = filterRecentItems(qualityTweets, "posted_on", 168);
 
   console.log(`X/Twitter News: ${recentTweets.length} from past week`);
 

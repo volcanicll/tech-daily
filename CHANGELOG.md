@@ -1,5 +1,52 @@
 # 更新日志
 
+## [2026-09-28] v2.4 更新 - 数据移出 main、修复三个失效的数据源 🔧
+
+### 🔧 分支历史治理
+
+日报状态与归档原先每天由 workflow 提交回 `main`，`git log` 很快就会被
+`chore(state): 更新 …` 填满，仓库体积也每天增长。
+
+- 数据整体移到独立的 **`daily-data` 分支**，`main` 只保留源码
+- 每次运行用「无父提交 + 强制推送」覆盖该分支，因此它**恒为 1 个提交**
+- `state/` 与 `docs/archive/` 加入 `.gitignore`，不会误提交进 main
+- GitHub Pages 改为从 `daily-data` / `docs` 提供服务
+
+顺带移除了 main 上那条机器人数据提交，本地与远端历史保持一致。
+
+### 🐛 修复失效的数据源
+
+线上日报启用了 18 个模块，实际只有 8 个产出内容。逐一排查后修掉三个：
+
+- **掘金**：`content_api/v1/content/article_rank` 与 `content/article_list`
+  两个路由都已下线（返回 `{"err_no":2,"err_msg":"请求路由不存在"}`）。
+  改用当前可用的 `recommend_api/v1/article/recommend_all_feed`，
+  并按新结构（`data[].item_info.article_info`）重写字段映射
+- **SegmentFault**：订阅源已换成 Atom 格式，而解析器只认 RSS 的 `<item>`
+  和元素文本链接 —— Atom 的链接在 `href` 属性上，于是**永远解析出 0 条且不报错**。
+  解析器改为同时兼容两种格式，并把标签名差异、作者 `name`/`uri` 拼接等一并处理
+- **时间窗**：`filterTodayItems` 按"本地日历今天 00:00"切，CI 跑在 UTC 下
+  窗口只有几小时；且对 UTC+8 的中文源，"今天"从北京时间早上 8 点才算起，
+  当天 0~8 点的内容被整体排除。改为**滚动时间窗**（`filterRecentItems`），
+  影响 8 个模块。实测 aiNews 从"30 条抓取 → 0 条留存"恢复
+
+### 📝 其他
+
+- 不可用的源不再静默失败：SegmentFault 文章源已下线，改为留空跳过并注明
+- 新增 `tests/feeds.test.js`，覆盖 Atom/RSS 双格式解析、掘金新结构映射、
+  滚动时间窗边界（含无法解析的时间戳）
+- 测试 140 → 153
+
+### ⚠️ 仍未解决
+
+- **LLM 三个功能**：`LLM_MODEL` 返回 404 `Not found the model or Permission denied`，
+  需要更换 secret，属配置问题而非代码问题
+- **Reddit**：20 个子版块全部 429，Reddit 限制机房 IP 的匿名访问，需要 OAuth
+- **Horizon**：`vendor/horizon` 在 `.gitignore` 中且 CI 无 Python，该模块在 CI 上无法运行
+- **HuggingFace 模型榜**：接口返回 400，需重新对接口
+
+---
+
 ## [2026-09-28] v2.3 更新 - 离线预览、静态归档与三处缺陷修复 ✨
 
 延续 v2.2 "部署在 GitHub Actions、零成本"的前提，这一轮重点是**缩短反馈循环**与**修掉几处会静默失灵的缺陷**。

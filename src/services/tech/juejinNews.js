@@ -8,24 +8,24 @@ const http = new HttpClient();
 const JUEJIN_CONFIG = {
   baseUrl: "https://api.juejin.cn",
   endpoints: {
-    // 推荐文章
-    recommend: "/content_api/v1/content/article_rank?category_id=1&type=hot",
-    // 热门文章
-    hot: "/content_api/v1/content/article_rank?category_id=1&type=hot",
-    // 最新文章
-    recent: "/content_api/v1/content/article_list?category_id=1&cursor=0&limit=20&sort_type=2",
+    // 旧的 content_api/v1/content/article_rank 与 content/article_list 已下线，
+    // 现在都返回 {"err_no":2,"err_msg":"请求路由不存在"}。
+    // 推荐流是当前唯一可用的公开接口。
+    feed: "/recommend_api/v1/article/recommend_all_feed",
   },
-  // 技术分类ID
-  categories: {
-    frontend: "6809637767543259144",
-    backend: "6809637769959738381",
-    ai: "6809637773838385159",
-    devops: "6809637771511388167",
-    mobile: "6809637769959738377",
-    database: "6809637770638833671",
+  // 推荐流的请求体参数（与网页端一致）
+  feedParams: {
+    id_type: 2,
+    client_type: 2608,
+    sort_type: 200,
+    cursor: "0",
+    limit: 30,
   },
   topN: 10,
 };
+
+/** 推荐流里只有 item_type === 2 是文章，其余是沸点、广告等 */
+const ITEM_TYPE_ARTICLE = 2;
 
 /**
  * 掘金 API 客户端类
@@ -50,69 +50,58 @@ class JuejinClient {
       "Origin": "https://juejin.cn",
     };
 
-    const response = await http.post(url, data, { headers });
-    return response;
+    return http.post(url, data, { headers });
   }
 
   /**
-   * 获取推荐文章
+   * 获取推荐流文章
    * @returns {Promise<Array>}
    */
-  async fetchRecommend() {
-    const data = await this.request(JUEJIN_CONFIG.endpoints.recommend);
-    return this.normalize(data);
-  }
-
-  /**
-   * 获取热门文章
-   * @returns {Promise<Array>}
-   */
-  async fetchHot() {
-    const data = await this.request(JUEJIN_CONFIG.endpoints.hot);
-    return this.normalize(data);
-  }
-
-  /**
-   * 获取最新文章
-   * @returns {Promise<Array>}
-   */
-  async fetchRecent() {
-    const data = await this.request(JUEJIN_CONFIG.endpoints.recent);
-    return this.normalize(data);
+  async fetchFeed() {
+    const response = await this.request(JUEJIN_CONFIG.endpoints.feed, {
+      ...JUEJIN_CONFIG.feedParams,
+    });
+    return this.normalize(response);
   }
 
   /**
    * 标准化文章数据格式
+   * 推荐流的结构是 data[].item_info.{article_info, author_user_info, tags}
    * @param {object} response - API 响应
    * @returns {Array}
    */
   normalize(response) {
-    if (!response || !response.data) {
+    const entries = response?.data;
+    if (!Array.isArray(entries)) {
       return [];
     }
 
-    const articles = response.data || [];
-    return articles.map(item => {
-      const content = item.content || {};
-      const author = item.author || {};
-      const community = item.community || {};
+    return entries
+      .filter((entry) => entry?.item_type === ITEM_TYPE_ARTICLE)
+      .map((entry) => {
+        const info = entry.item_info || {};
+        const article = info.article_info || {};
+        const author = info.author_user_info || {};
+        const tags = (info.tags || []).map((tag) => tag?.tag_name).filter(Boolean);
 
-      return {
-        id: item.content_id || item.id,
-        title: content.title || item.title || "",
-        url: `https://juejin.cn/post/${content.content_id || item.id}`,
-        description: this.cleanContent(content.brief_content || content.content || "", 150),
-        author: author.user_name || "Unknown",
-        posted_on: item.content ? 
-          new Date(item.content.ctime * 1000).toISOString() : 
-          new Date().toISOString(),
-        category: community.name || "技术",
-        tags: (content.tag_ids || []).slice(0, 3),
-        digg_count: item.content_counter?.digg_count || 0,
-        comment_count: item.content_counter?.comment_count || 0,
-        view_count: item.content_counter?.view_count || 0,
-      };
-    });
+        return {
+          id: article.article_id,
+          title: article.title || "",
+          url: `https://juejin.cn/post/${article.article_id}`,
+          description: this.cleanContent(article.brief_content || "", 150),
+          author: author.user_name || "Unknown",
+          posted_on: article.ctime
+            ? new Date(Number(article.ctime) * 1000).toISOString()
+            : new Date().toISOString(),
+          // 推荐流给的是具体标签（如"人工智能"），比旧接口的分类名更贴切
+          category: tags[0] || info.category?.category_name || "技术",
+          tags: tags.slice(0, 3),
+          digg_count: article.digg_count || 0,
+          comment_count: article.comment_count || 0,
+          view_count: article.view_count || 0,
+        };
+      })
+      .filter((item) => item.id && item.title);
   }
 
   /**
@@ -150,38 +139,27 @@ async function getJuejinNews() {
 
   try {
     console.log("Fetching Juejin hot articles...");
-    
-    // 获取推荐和热门文章
-    const [recommend, hot] = await Promise.all([
-      client.fetchRecommend().catch(e => {
-        console.error("Juejin recommend fetch error:", e.message);
-        return [];
-      }),
-      client.fetchHot().catch(e => {
-        console.error("Juejin hot fetch error:", e.message);
-        return [];
-      }),
-    ]);
 
-    // 合并去重
-    const allArticles = [...recommend, ...hot];
+    const articles = await client.fetchFeed();
+
+    // 去重
     const seen = new Set();
-    const uniqueArticles = allArticles.filter(article => {
+    const uniqueArticles = articles.filter((article) => {
       if (seen.has(article.id)) return false;
       seen.add(article.id);
       return true;
     });
 
-    // 按热度排序（点赞+评论+浏览）
-    const sortedArticles = uniqueArticles.sort((a, b) => {
-      const scoreA = (a.digg_count || 0) * 2 + (a.comment_count || 0) * 3 + (a.view_count || 0) * 0.1;
-      const scoreB = (b.digg_count || 0) * 2 + (b.comment_count || 0) * 3 + (b.view_count || 0) * 0.1;
-      return scoreB - scoreA;
-    });
+    // 按热度排序（点赞 + 评论 + 浏览）
+    const scoreOf = (a) =>
+      (a.digg_count || 0) * 2 +
+      (a.comment_count || 0) * 3 +
+      (a.view_count || 0) * 0.1;
 
-    // 取前N条
-    const topArticles = sortedArticles.slice(0, JUEJIN_CONFIG.topN);
-    
+    const topArticles = uniqueArticles
+      .sort((a, b) => scoreOf(b) - scoreOf(a))
+      .slice(0, JUEJIN_CONFIG.topN);
+
     console.log(`Juejin: returning ${topArticles.length} top articles`);
     return topArticles;
   } catch (error) {

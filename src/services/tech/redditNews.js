@@ -2,7 +2,7 @@ const HttpClient = require("../../utils/http");
 const http = new HttpClient();
 const cheerio = require("cheerio");
 const { translateBatch } = require("../../utils/translation");
-const { filterTodayItems } = require("../../utils/common");
+const { filterRecentItems } = require("../../utils/common");
 
 /**
  * Reddit 技术社区 RSS 源配置
@@ -270,7 +270,7 @@ async function getRedditNews() {
   );
 
   // 过滤只保留当天的内容
-  const todayNews = filterTodayItems(itemsToTranslate);
+  const todayNews = filterRecentItems(itemsToTranslate);
   console.log(`Reddit: filtered to ${todayNews.length} items from today`);
 
   return todayNews;

@@ -1,6 +1,6 @@
 const HttpClient = require("../../utils/http");
 const http = new HttpClient();
-const { filterTodayItems } = require("../../utils/common");
+const { filterRecentItems } = require("../../utils/common");
 
 const V2EX_BASE_URL = "https://www.v2ex.com";
 
@@ -221,7 +221,7 @@ async function getV2exNews() {
 
   // V2EX 内容主要为中文，无需翻译
   // 过滤只保留当天内容（可选，根据需求）
-  // const todayNews = filterTodayItems(formattedNews);
+  // const todayNews = filterRecentItems(formattedNews);
   // console.log(`V2EX: filtered to ${todayNews.length} items from today`);
 
   console.log(`V2EX: returning ${formattedNews.length} ranked topics`);

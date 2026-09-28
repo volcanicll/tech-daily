@@ -8,7 +8,7 @@ const http = new HttpClient();
 const cheerio = require("cheerio");
 const { NEWS_SOURCES, FILTER_CONFIG } = require("../../config/constants");
 const { translateBatch } = require("../../utils/translation");
-const { filterTodayItems } = require("../../utils/common");
+const { filterRecentItems } = require("../../utils/common");
 
 const MACRO_SOURCES = NEWS_SOURCES.macroRSS;
 
@@ -109,7 +109,7 @@ async function getMacroNews(limit = 5) {
   );
 
   // 过滤今天的新闻
-  const todayNews = filterTodayItems(allNews);
+  const todayNews = filterRecentItems(allNews);
 
   // 按关键词过滤（只保留与宏观金融相关的新闻）
   const filtered = todayNews.filter(item => {

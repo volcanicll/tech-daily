@@ -3,7 +3,7 @@ const http = new HttpClient();
 const {
   translateToChinese,
   fetchWithRetry,
-  filterTodayItems,
+  filterRecentItems,
 } = require("../../utils/common");
 
 const CRYPTOCOMPARE_API_URL = "https://min-api.cryptocompare.com/data/v2";
@@ -74,7 +74,7 @@ async function getCryptoNews() {
     await new Promise((r) => setTimeout(r, 200));
   }
   // 过滤只保留当天的消息
-  const todayNews = filterTodayItems(translatedNews);
+  const todayNews = filterRecentItems(translatedNews);
   console.log(`Crypto News: filtered to ${todayNews.length} items from today`);
   return todayNews;
 }

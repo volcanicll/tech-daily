@@ -53,7 +53,7 @@
 
 ### 🧠 状态与记忆 ✨
 
-日报每天会把自己观察到的结果提交回仓库（`state/` 目录），因此它不只有"今天"，还有"变化"：
+日报每天会把自己观察到的结果保存下来，因此它不只有"今天"，还有"变化"：
 
 | 能力 | 说明 |
 |------|------|
@@ -91,20 +91,31 @@ bun run preview -- --md                    # 只输出 Markdown，便于管道�
 
 ### 📚 静态归档（可选）✨
 
-把 `config/daily.json` 里的 `archive` 设为 `true`，每天的日报会同时落成静态页面：
+把 `config/daily.json` 里的 `archive` 设为 `true`，每天的日报会同时落成静态页面。
+
+归档和状态都放在**独立的 `daily-data` 分支**上，`main` 只保留源码：
 
 ```
-docs/
-├── index.html              # 归档首页，支持按日期/头条关键词搜索
-└── archive/
-    ├── index.json          # 索引：日期、头条标题、数据源健康度
-    ├── 2026-09-28.md       # 原始 Markdown
-    └── 2026-09-28.html     # 渲染后的页面
+main 分支                          daily-data 分支（恒为 1 个提交）
+├── src/                           ├── state/
+├── config/daily.json              │   ├── seen.json       # 去重指纹
+└── docs/index.html  ← 归档页外壳   │   └── history.json    # 价格序列与连挂记录
+                                   └── docs/
+                                       ├── index.html      # 归档首页（外壳来自 main）
+                                       └── archive/
+                                           ├── index.json
+                                           ├── 2026-09-28.md
+                                           └── 2026-09-28.html
 ```
 
-在仓库 `Settings → Pages` 里把 Source 设为 **main 分支 / `docs` 目录**，就能得到一个可搜索、可链接、永久的归档站。聊天消息推完就沉了，归档是能回看的资产。
+之所以分开放：数据提交每天一次，如果留在 `main` 上，`git log` 很快就会变成一长串 `chore(state)`，仓库也会每天多一份归档副本。`daily-data` 每次都用**无父提交 + 强制推送**覆盖，因此它永远只有 1 个提交 —— 历史不堆积，体积不增长。
 
-默认**关闭**：开启后 `docs/` 会随日报一起提交，仓库体积会持续增长（每天约 30KB）。不需要就直接保持 `false`。
+启用步骤：
+
+1. `config/daily.json` 里把 `archive` 设为 `true`
+2. `Settings → Pages` 把 Source 设为 **`daily-data` 分支 / `docs` 目录**
+
+默认**关闭**。开启后归档站会公开可访问（仓库是 public 的话），不需要就保持 `false`。
 
 ---
 
@@ -155,7 +166,7 @@ Fork 本仓库后，在 `Settings > Secrets and variables > Actions` 中配置�
 两点说明：
 
 - **模块开关不在 Secrets 里**，改 [config/daily.json](config/daily.json) 即可，省掉一堆不会同步更新的 secret
-- workflow 已声明 `permissions: contents: write`，用于把 `state/` 提交回仓库。如果 fork 后仓库的 Actions 权限被设为只读，需要在 `Settings > Actions > General > Workflow permissions` 里放开写权限，否则日报的"记忆"不会累积（推送本身不受影响）
+- workflow 已声明 `permissions: contents: write`，用于把数据推送到 `daily-data` 分支。如果 fork 后仓库的 Actions 权限被设为只读，需要在 `Settings > Actions > General > Workflow permissions` 里放开写权限，否则日报的"记忆"不会累积（推送本身不受影响）
 
 每次运行还会把 `dist/digest.md` 和 `dist/health.json` 作为 artifact 上传（保留 90 天），完整日报和健康度也会写进该次运行的 Summary 页面。
 
@@ -166,12 +177,8 @@ Fork 本仓库后，在 `Settings > Secrets and variables > Actions` 中配置�
 ```
 config/
 └── daily.json                  # 模块开关（提交即可生效）✨
-state/                          # 由 workflow 每日提交回仓库，日报的"记忆" ✨
-├── seen.json                   # 近 30 天的去重指纹
-└── history.json                # 价格序列与连续上榜记录
-docs/                           # 静态归档（archive 开关开启后生成）✨
-├── index.html                  # 归档首页，支持按日期/头条搜索
-└── archive/                    # 每天的 .md / .html 与索引
+docs/
+└── index.html                  # 归档首页外壳；归档数据在 daily-data 分支 ✨
 scripts/
 ├── preview.js                  # bun run preview：离线渲染整份日报 ✨
 └── fixture.js                  # 离线预览用的样例数据 ✨

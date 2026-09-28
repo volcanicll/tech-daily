@@ -11,7 +11,7 @@ concurrency:
   group: daily-digest
   cancel-in-progress: false
 
-# 需要写权限把 state/ 提交回仓库（GitHub 的默认 token 是只读的）
+# 需要写权限把数据推送到 daily-data 分支（GitHub 的默认 token 是只读的）
 permissions:
   contents: write
 
@@ -59,6 +59,22 @@ jobs:
       - name: run tests
         run: bun run test
 
+      # 日报的"记忆"和归档放在独立的 daily-data 分支上，main 只保留源码。
+      # 每天用「无父提交 + 强制推送」覆盖那个分支，因此它永远只有 1 个提交：
+      # main 的历史不会变成一长串 chore(state)，仓库也不会每天新增一份归档副本。
+      - name: restore accumulated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git fetch --depth=1 origin daily-data 2>/dev/null; then
+            git checkout origin/daily-data -- state docs/archive \
+              || echo "⚠️ daily-data 存在但缺少数据目录，按空数据继续"
+            echo "已恢复累积的状态与归档"
+          else
+            echo "daily-data 尚不存在，按首次运行处理"
+          fi
+
       - name: run js
         run: bun run start
 
@@ -72,21 +88,25 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
-      # 状态是日报"记忆"的载体：价格序列、去重指纹、连续上榜记录。
-      # docs/ 是静态归档（仅在 config/daily.json 里开启 archive 后才会写入）。
-      # 提交回仓库顺带把 GitHub 的 60 天无活动停用计时器重置掉。
-      # 用默认 token 推送不会触发新的 workflow，所以不存在自触发循环。
-      - name: commit state & archive
+      - name: publish data
         if: always()
         run: |
-          if [ -z "$(git status --porcelain state docs)" ]; then
-            echo "状态无变化，跳过提交"
+          # 归档页外壳（docs/index.html）在 main 上，数据在本次工作区里，
+          # 两者合起来才是完整的归档站点
+          git checkout --orphan daily-data-publish
+          git rm -rf --cached . >/dev/null 2>&1 || true
+
+          for path in state docs/index.html docs/.nojekyll docs/archive; do
+            if [ -e "$path" ]; then
+              git add -f "$path"
+            fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "无数据可发布，跳过"
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state docs
-          git commit -m "chore(state): 更新 $(date -u +%F) 日报状态"
-          git pull --rebase
-          git push
+          git commit -q -m "chore(data): $(date -u +%F) 日报状态与归档快照"
+          git push --force origin HEAD:daily-data
+          echo "已发布到 daily-data（该分支恒为 1 个提交）"

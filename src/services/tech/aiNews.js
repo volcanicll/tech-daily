@@ -2,7 +2,7 @@ const HttpClient = require("../../utils/http");
 const http = new HttpClient();
 const cheerio = require("cheerio");
 const { translateBatch } = require("../../utils/translation");
-const { filterTodayItems } = require("../../utils/common");
+const { filterRecentItems } = require("../../utils/common");
 
 const AI_SOURCES = [
   {
@@ -152,7 +152,7 @@ async function getAINews() {
   const translatedAiNews = itemsToTranslate;
 
   // 过滤只保留当天的消息
-  const todayNews = filterTodayItems(translatedAiNews);
+  const todayNews = filterRecentItems(translatedAiNews);
   console.log(`AI News: filtered to ${todayNews.length} items from today`);
   return todayNews;
 }

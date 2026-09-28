@@ -7,7 +7,7 @@
 const HttpClient = require("../../utils/http");
 const http = new HttpClient();
 const cheerio = require("cheerio");
-const { filterTodayItems } = require("../../utils/common");
+const { filterRecentItems } = require("../../utils/common");
 const { translateBatch } = require("../../utils/translation");
 
 const SECURITY_SOURCES = [
@@ -105,7 +105,7 @@ async function getSecurityRadar(limit = 8) {
   );
 
   // 优先保留近两天发布的内容；源更新慢时回退为最新若干条
-  const recent = filterTodayItems(allNews, "pubDate", 2);
+  const recent = filterRecentItems(allNews, "pubDate", 48);
   const result = (recent.length > 0 ? recent : allNews).slice(0, limit);
 
   console.log(`Got ${result.length} security news items`);
