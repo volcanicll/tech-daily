@@ -190,47 +190,6 @@ const COMMENTARY_PROMPTS = {
 };
 
 /**
- * AI 推荐 Prompt 模板
- */
-const RECOMMENDATIONS_PROMPT = {
-  system: `你是加密货币和 AI 领域的内容策展人。你的任务：
-- 从所有新闻中精选 6 条最有价值的内容
-- 优先选择：重大突破、行业动态、实用工具
-- 每条推荐用一句话说明"为什么值得关注"
-- 格式简洁，便于快速阅读
-- 每条说明控制在 30 字以内`,
-
-  buildPrompt: (allNews) => {
-    let prompt = "以下是从各个来源收集的今日资讯：\n\n";
-
-    // 按来源分组
-    const groups = {
-      AI: allNews.filter(n => n.category === "ai").slice(0, 10),
-      AgentCode: allNews.filter(n => n.category === "agentCode").slice(0, 10),
-      Crypto: allNews.filter(n => n.category === "crypto").slice(0, 10),
-      V2EX: allNews.filter(n => n.category === "v2ex").slice(0, 5),
-      Twitter: allNews.filter(n => n.category === "twitter").slice(0, 5),
-    };
-
-    for (const [group, items] of Object.entries(groups)) {
-      if (items.length > 0) {
-        prompt += `【${group}】\n`;
-        items.forEach((item, i) => {
-          prompt += `${i + 1}. ${item.title}\n`;
-        });
-        prompt += "\n";
-      }
-    }
-
-    prompt += `请精选 6 条最有价值的资讯，并说明推荐理由：`;
-
-    return prompt;
-  },
-
-  temperature: LLM_CONFIG.temperature.recommendations,
-};
-
-/**
  * 新闻亮点 Prompt 模板
  */
 const HIGHLIGHTS_PROMPT = {
@@ -243,7 +202,7 @@ const HIGHLIGHTS_PROMPT = {
   buildPrompt: (allNews) => {
     let prompt = "以下是今日收集的所有新闻标题：\n\n";
 
-    allNews.slice(0, 30).forEach((item, i) => {
+    allNews.forEach((item, i) => {
       prompt += `${i + 1}. ${item.title}`;
       if (item.source) {
         prompt += ` (${item.source})`;
@@ -279,7 +238,6 @@ function getAvailableStyles() {
 
 module.exports = {
   COMMENTARY_PROMPTS,
-  RECOMMENDATIONS_PROMPT,
   HIGHLIGHTS_PROMPT,
   getCommentaryPrompt,
   getAvailableStyles,

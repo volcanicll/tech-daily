@@ -6,6 +6,7 @@
   "scripts": {
     "start": "bun src/app.js",
     "dev": "bun --watch src/app.js",
+    "preview": "bun scripts/preview.js",
     "test": "bun test"
   },
   "keywords": [

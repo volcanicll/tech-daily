@@ -8,6 +8,7 @@ const { execFile } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const { env } = require("../../config/env");
+const { isContentModuleEnabled } = require("../../config/modules");
 
 const HORIZON_DIR = path.resolve(__dirname, "../../vendor/horizon");
 const HORIZON_PYTHON = path.join(HORIZON_DIR, ".venv/bin/python");
@@ -16,7 +17,7 @@ const SUMMARIES_DIR = path.join(HORIZON_DIR, "data/summaries");
 
 class HorizonService {
   constructor() {
-    this.enabled = process.env.MODULE_HORIZON !== "false";
+    this.enabled = isContentModuleEnabled("horizon");
   }
 
   /**

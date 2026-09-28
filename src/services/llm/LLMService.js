@@ -150,9 +150,9 @@ class LLMService {
     }
 
     try {
-      // 构建资讯列表
+      // 候选列表已由调用方按来源轮转取样并限量，这里不再二次截断 ——
+      // 再 slice 一次会把靠后的来源重新切掉
       const newsList = allNews
-        .slice(0, 30)
         .map(
           (news, idx) =>
             `[${idx + 1}] ${news.title} (来源: ${

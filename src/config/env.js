@@ -68,6 +68,12 @@ const env = {
   github: {
     token: process.env.GITHUB_TOKEN || "",
   },
+
+  // 生活模块配置
+  lifestyle: {
+    // 天气模块需要指定城市（MODULE_WEATHER=true 时生效）
+    weatherCity: process.env.WEATHER_CITY || "重庆",
+  },
 };
 
 /**

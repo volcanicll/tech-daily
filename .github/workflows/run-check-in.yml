@@ -1,14 +1,29 @@
-name: Crypto Daily CheckIn
+name: Tech Daily Digest
 
 on:
   schedule:
-    # 每天UTC时间1:00 AM，北京时间9:00 AM
+    # 每天 UTC 1:00，北京时间 9:00
     - cron: "0 1 * * *"
   workflow_dispatch:
+
+# 防止手动重跑和定时任务撞车，导致同一天推送两条日报
+concurrency:
+  group: daily-digest
+  cancel-in-progress: false
+
+# 需要写权限把 state/ 提交回仓库（GitHub 的默认 token 是只读的）
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 兜底：避免某个数据源挂住把 job 拖到默认的 6 小时上限
+    timeout-minutes: 20
+
     env:
+      # 模块开关在 config/daily.json 里，不再占用 Secrets
+      # 只有真正的凭据才放在这里
       COINGECKO_COOKIE: ${{secrets.COINGECKO_COOKIE}}
       COINGECKO_TOKEN: ${{secrets.COINGECKO_TOKEN}}
       COINMARKET_COOKIE: ${{secrets.COINMARKET_COOKIE}}
@@ -24,16 +39,10 @@ jobs:
       LLM_MODEL: ${{secrets.LLM_MODEL}}
       DINGTALK_SECRET: ${{secrets.DINGTALK_SECRET}}
       DINGTALK_ACCESS_TOKEN: ${{secrets.DINGTALK_ACCESS_TOKEN}}
-      MODULE_GOLD: ${{secrets.MODULE_GOLD}}
-      MODULE_CRYPTO: ${{secrets.MODULE_CRYPTO}}
-      MODULE_AI_NEWS: ${{secrets.MODULE_AI_NEWS}}
-      MODULE_LLM_COMMENTARY: ${{secrets.MODULE_LLM_COMMENTARY}}
-      MODULE_WEATHER: ${{secrets.MODULE_WEATHER}}
-      MODULE_QUOTE: ${{secrets.MODULE_QUOTE}}
-      NOTIFY_TELEGRAM: ${{secrets.NOTIFY_TELEGRAM}}
-      NOTIFY_DINGTALK: ${{secrets.NOTIFY_DINGTALK}}
-      NOTIFY_WX_BOT: ${{secrets.NOTIFY_WX_BOT}}
-      NOTIFY_WX_APP: ${{secrets.NOTIFY_WX_APP}}
+      RAPID_API_KEY: ${{secrets.RAPID_API_KEY}}
+      PRODUCTHUNT_API_TOKEN: ${{secrets.PRODUCTHUNT_API_TOKEN}}
+      # 默认 token 即可把 GitHub API 限额从 60/小时 提到 1000/小时
+      GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
     steps:
       - name: checkout
@@ -52,3 +61,32 @@ jobs:
 
       - name: run js
         run: bun run start
+
+      # 即使日报失败，也把现场留下，方便排查
+      - name: upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ github.run_number }}
+          path: dist/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      # 状态是日报"记忆"的载体：价格序列、去重指纹、连续上榜记录。
+      # docs/ 是静态归档（仅在 config/daily.json 里开启 archive 后才会写入）。
+      # 提交回仓库顺带把 GitHub 的 60 天无活动停用计时器重置掉。
+      # 用默认 token 推送不会触发新的 workflow，所以不存在自触发循环。
+      - name: commit state & archive
+        if: always()
+        run: |
+          if [ -z "$(git status --porcelain state docs)" ]; then
+            echo "状态无变化，跳过提交"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state docs
+          git commit -m "chore(state): 更新 $(date -u +%F) 日报状态"
+          git pull --rebase
+          git push

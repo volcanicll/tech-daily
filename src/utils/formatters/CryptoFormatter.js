@@ -5,6 +5,8 @@ const {
   infoRow,
   formatRelativeTime,
 } = require("./DingTalkMarkdownUtils");
+const { sparkline } = require("../sparkline");
+const { STATE_CONFIG } = require("../../config/constants");
 
 /**
  * Format crypto market and news data
@@ -12,11 +14,28 @@ const {
  * @param {Array} data.marketData
  * @param {Array} data.newsData
  * @param {object} data.sentimentData
+ * @param {object} [options]
+ * @param {object} [options.series] - 各币种的历史价格序列 { BTC: [..] }，用于画走势
+ * @param {number} [options.sparklineDays]
  * @returns {string} Formatted crypto report
  */
-const formatCrypto = ({ marketData, newsData, sentimentData }) => {
+const formatCrypto = ({ marketData, newsData, sentimentData }, options = {}) => {
+  const sparklineDays = options.sparklineDays ?? STATE_CONFIG.sparklineDays;
+
+  // 币种符号大小写在不同数据源之间不一致，统一后再查历史序列
+  const seriesBySymbol = {};
+  for (const [symbol, values] of Object.entries(options.series || {})) {
+    seriesBySymbol[symbol.toUpperCase()] = values;
+  }
+
+  const hasTrend = (marketData || []).some(
+    (coin) => (seriesBySymbol[coin.symbol?.toUpperCase()] || []).length >= 2
+  );
+
   let message = sectionHeader("💰", "加密行情");
-  message += "> _主流币价格 · 恐慌贪婪指数_\n\n";
+  message += hasTrend
+    ? `> _主流币价格 · 恐慌贪婪指数 · 近${sparklineDays}日走势_\n\n`
+    : "> _主流币价格 · 恐慌贪婪指数_\n\n";
 
   // Sentiment Data (Fear & Greed)
   if (sentimentData) {
@@ -45,7 +64,14 @@ const formatCrypto = ({ marketData, newsData, sentimentData }) => {
       const change = coin.price_change_percentage_24h.toFixed(2);
       const icon = change >= 0 ? "📈" : "📉";
       const changeStr = `${change > 0 ? "+" : ""}${change}%`;
-      message += priceItem(icon, coin.symbol.toUpperCase(), price, changeStr);
+
+      const trend = sparkline(seriesBySymbol[coin.symbol?.toUpperCase()] || []);
+      message += priceItem(
+        icon,
+        coin.symbol.toUpperCase(),
+        price,
+        trend ? `${changeStr}  ${trend}` : changeStr
+      );
     });
   }
 

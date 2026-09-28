@@ -1,97 +1,138 @@
 /**
  * 模块配置中心
  * 统一管理内容模块和通知服务的开关
+ *
+ * 配置优先级（从高到低）：
+ *   1. 环境变量 MODULE_* / NOTIFY_* —— 临时覆盖，适合单次手动运行
+ *   2. config/daily.json             —— 仓库内的默认开关，提交即可生效
+ *   3. 本文件的内置默认值             —— 配置文件缺失或损坏时的兜底
+ *
+ * 之所以把开关从 Secrets 搬进仓库里的 JSON：开关本身不是密钥，而配置文件
+ * 能 diff、能 review、能回滚，也不会随模块增加而让 workflow 的 env 列表失控。
  */
 
-/**
- * 内容模块配置
- * 控制日报中各内容块的启用/禁用
- */
-const contentModules = {
-  // 金价模块 (默认启用)
-  gold: process.env.MODULE_GOLD !== "false",
+const fs = require("fs");
+const path = require("path");
 
-  // 加密货币行情模块 (默认启用)
-  crypto: process.env.MODULE_CRYPTO !== "false",
+const CONFIG_FILE = path.resolve(__dirname, "../../config/daily.json");
 
-  // AI 资讯模块 (默认启用)
-  aiNews: process.env.MODULE_AI_NEWS !== "false",
-
-  // Agent Code 资讯模块 (默认启用)
-  agentCode: process.env.MODULE_AGENT_CODE !== "false",
-
-  // Horizon 科技雷达模块 (默认启用，AI精选HN/Reddit/RSS/GitHub)
-  horizon: process.env.MODULE_HORIZON !== "false",
-
-  // V2EX 日报模块 (默认启用)
-  v2ex: process.env.MODULE_V2EX !== "false",
-
-  // 宏观金融新闻模块 (默认启用)
-  macro: process.env.MODULE_MACRO_NEWS !== "false",
-
-  // 新闻亮点模块 (默认启用)
-  newsHighlights: process.env.MODULE_NEWS_HIGHLIGHTS !== "false",
-
-  // X/Twitter 热门技术贴模块 (默认禁用，需配置 RAPID_API_KEY)
-  xTwitter: process.env.MODULE_X_TWITTER === "true",
-
-  // AI 精选推荐模块 (默认启用)
-  aiRecommendations: process.env.MODULE_AI_RECOMMENDATIONS !== "false",
-
-  // LLM 锐评模块 (默认启用)
-  llmCommentary: process.env.MODULE_LLM_COMMENTARY !== "false",
-
-  // 天气模块 (默认禁用)
-  weather: process.env.MODULE_WEATHER === "true",
-
-  // 情话/一言模块 (默认禁用)
-  quote: process.env.MODULE_QUOTE === "true",
-
-  // AI 模型排行模块 (默认启用)
-  aiModels: process.env.MODULE_AI_MODELS !== "false",
-
-  // GitHub 新热门仓库模块 (默认启用)
-  githubStars: process.env.MODULE_GITHUB_STARS !== "false",
-
-  // Product Hunt 新品模块 (默认禁用，需配置 PRODUCTHUNT_API_TOKEN)
-  productHunt: process.env.MODULE_PRODUCT_HUNT === "true",
-
-  // Reddit 技术社区模块 (默认启用)
-  reddit: process.env.MODULE_REDDIT !== "false",
-
-  // 掘金技术社区模块 (默认启用)
-  juejin: process.env.MODULE_JUEJIN !== "false",
-
-  // SegmentFault 技术问答模块 (默认启用)
-  segmentfault: process.env.MODULE_SEGMENTFAULT !== "false",
-
-  // LeetCode 每日一题模块 (默认启用)
-  leetcode: process.env.MODULE_LEETCODE !== "false",
-
-  // 科技史上的今天模块 (默认启用)
-  techHistory: process.env.MODULE_TECH_HISTORY !== "false",
-
-  // 每日安全雷达模块 (默认启用)
-  securityRadar: process.env.MODULE_SECURITY_RADAR !== "false",
+/** 内置兜底默认值，同时也是合法的模块名清单（未列出的键会被忽略） */
+const DEFAULT_CONTENT_MODULES = {
+  gold: true,
+  crypto: true,
+  aiNews: true,
+  agentCode: true,
+  horizon: true,
+  v2ex: true,
+  macro: true,
+  newsHighlights: true,
+  aiRecommendations: true,
+  llmCommentary: true,
+  aiModels: true,
+  githubStars: true,
+  reddit: true,
+  juejin: true,
+  segmentfault: true,
+  leetcode: true,
+  techHistory: true,
+  securityRadar: true,
+  xTwitter: false,
+  productHunt: false,
+  weather: false,
+  quote: false,
+  // 把每日日报落成静态归档（docs/），配合 GitHub Pages 使用
+  archive: false,
 };
 
-/**
- * 通知服务配置
- * 控制各推送渠道的启用/禁用
- */
-const notificationServices = {
-  // Telegram (默认启用)
-  telegram: process.env.NOTIFY_TELEGRAM !== "false",
-
-  // 钉钉群机器人 (默认启用)
-  dingtalk: process.env.NOTIFY_DINGTALK !== "false",
-
-  // 企业微信群机器人 (默认禁用)
-  wxBot: process.env.NOTIFY_WX_BOT === "true",
-
-  // 企业微信应用消息 (默认禁用)
-  wxApp: process.env.NOTIFY_WX_APP === "true",
+const DEFAULT_NOTIFICATION_SERVICES = {
+  telegram: true,
+  dingtalk: true,
+  wxBot: false,
+  wxApp: false,
 };
+
+const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
+const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
+
+/**
+ * 驼峰转大写下划线：aiNews -> AI_NEWS
+ * @param {string} prefix
+ * @param {string} name
+ * @returns {string}
+ */
+function envKeyFor(prefix, name) {
+  return prefix + name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
+}
+
+/**
+ * 解析布尔环境变量，无法识别时返回 undefined 交由下一层决定
+ * @param {string|undefined} raw
+ * @returns {boolean|undefined}
+ */
+function parseBoolean(raw) {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+
+  const value = String(raw).trim().toLowerCase();
+  if (TRUE_VALUES.has(value)) return true;
+  if (FALSE_VALUES.has(value)) return false;
+  return undefined;
+}
+
+/**
+ * 读取 config/daily.json，失败时返回空对象（回退到内置默认值）
+ * @returns {{modules: object, notifications: object}}
+ */
+function readConfigFile() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    return {
+      modules: parsed.modules || {},
+      notifications: parsed.notifications || {},
+    };
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.warn(`⚠️ 读取 ${CONFIG_FILE} 失败，回退到内置默认值: ${error.message}`);
+    }
+    return { modules: {}, notifications: {} };
+  }
+}
+
+/**
+ * 按 环境变量 > 配置文件 > 内置默认值 的顺序解析开关
+ * @param {object} defaults
+ * @param {object} fileValues
+ * @param {string} envPrefix
+ * @returns {object}
+ */
+function resolveSwitches(defaults, fileValues, envPrefix) {
+  const resolved = {};
+
+  for (const [name, fallback] of Object.entries(defaults)) {
+    const fromEnv = parseBoolean(process.env[envKeyFor(envPrefix, name)]);
+    const fromFile =
+      typeof fileValues[name] === "boolean" ? fileValues[name] : undefined;
+
+    resolved[name] = fromEnv ?? fromFile ?? fallback;
+  }
+
+  return resolved;
+}
+
+const fileConfig = readConfigFile();
+
+/** 内容模块开关（已解析） */
+const contentModules = resolveSwitches(
+  DEFAULT_CONTENT_MODULES,
+  fileConfig.modules,
+  "MODULE_"
+);
+
+/** 通知服务开关（已解析） */
+const notificationServices = resolveSwitches(
+  DEFAULT_NOTIFICATION_SERVICES,
+  fileConfig.notifications,
+  "NOTIFY_"
+);
 
 /**
  * 检查模块是否启用
@@ -138,4 +179,10 @@ module.exports = {
   isNotificationEnabled,
   getEnabledContentModules,
   getEnabledNotifications,
+  envKeyFor,
+  CONFIG_FILE,
+  // 内置默认值：与 config/daily.json 的值是两回事，前者是"没有配置文件时的兜底"，
+  // 后者才是本仓库实际生效的配置
+  DEFAULT_CONTENT_MODULES,
+  DEFAULT_NOTIFICATION_SERVICES,
 };

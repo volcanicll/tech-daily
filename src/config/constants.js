@@ -52,6 +52,9 @@ const TRANSLATION_CONFIG = {
   batchSize: 5,             // 每批翻译数量
   delay: 200,               // 批次间延迟 (ms)
   maxLength: 5000,          // 单次翻译最大长度
+  // 连续失败多少次后熔断：免费翻译端点从机房 IP 出去容易被限流，
+  // 逐个失败会白白拖慢整轮，还让降级无声无息
+  failureThreshold: 5,
   // 中文正则，用于检测是否需要翻译
   chineseRegex: /[\u4e00-\u9fa5]/,
 };
@@ -106,6 +109,15 @@ const LLM_CONFIG = {
 };
 
 /**
+ * AI 候选内容挑选
+ * 各来源轮流取样，避免靠后的来源被整体截断掉
+ */
+const SELECTION_CONFIG = {
+  perSourceLimit: 8,   // 每个来源最多贡献多少条给 AI 筛选
+  candidateLimit: 30,  // 送给 AI 的候选总量上限
+};
+
+/**
  * 格式化限制
  */
 const FORMAT_LIMITS = {
@@ -124,6 +136,17 @@ const FORMAT_LIMITS = {
 const CACHE_CONFIG = {
   rssTTL: 15 * 60 * 1000,   // RSS 缓存时间 (15分钟)
   translationTTL: 60 * 60 * 1000,  // 翻译缓存时间 (1小时)
+};
+
+/**
+ * 状态持久化配置
+ * 部署在 GitHub Actions 上没有数据库，用仓库内的 JSON 文件当存储
+ */
+const STATE_CONFIG = {
+  dir: "state",             // 相对仓库根目录
+  seenRetentionDays: 30,    // 去重窗口：超过这个天数的指纹会被清理
+  priceRetentionDays: 90,   // 价格序列保留天数
+  sparklineDays: 7,         // 消息里展示的走势天数
 };
 
 /**
@@ -240,6 +263,8 @@ module.exports = {
   LLM_CONFIG,
   FORMAT_LIMITS,
   CACHE_CONFIG,
+  STATE_CONFIG,
+  SELECTION_CONFIG,
   NEWS_SOURCES,
   EMOJI,
 };

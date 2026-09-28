@@ -1,0 +1,34 @@
+{
+  "$comment": "日报的模块开关。改这里 = 改默认行为，提交即可生效，且能看到 diff、能回滚。环境变量 MODULE_* / NOTIFY_* 仍可临时覆盖（优先级更高），适合单次手动运行。",
+  "modules": {
+    "gold": true,
+    "crypto": true,
+    "aiNews": true,
+    "agentCode": true,
+    "horizon": true,
+    "v2ex": true,
+    "macro": true,
+    "newsHighlights": true,
+    "aiRecommendations": true,
+    "llmCommentary": true,
+    "aiModels": true,
+    "githubStars": true,
+    "reddit": true,
+    "juejin": true,
+    "segmentfault": true,
+    "leetcode": true,
+    "techHistory": true,
+    "securityRadar": true,
+    "xTwitter": false,
+    "productHunt": false,
+    "weather": false,
+    "quote": false,
+    "archive": true
+  },
+  "notifications": {
+    "telegram": false,
+    "dingtalk": true,
+    "wxBot": false,
+    "wxApp": false
+  }
+}

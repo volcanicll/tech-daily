@@ -18,9 +18,11 @@ class TranslationCache {
 
   /**
    * 生成缓存键
+   * 用全文而不是前 100 字符：两条内容前 100 字相同的条目会互相覆盖，
+   * 导致把 A 的译文贴到 B 上
    */
   _getKey(text, targetLang = "zh-CN") {
-    return `${targetLang}:${text.substring(0, 100)}`;
+    return `${targetLang}:${text}`;
   }
 
   /**
@@ -82,6 +84,17 @@ class TranslationBatcher {
     this.delay = options.delay || TRANSLATION_CONFIG.delay;
     this.cache = new TranslationCache();
     this.chineseRegex = TRANSLATION_CONFIG.chineseRegex;
+    // 可注入，便于离线测试熔断行为
+    this.translateFn = options.translator || translate;
+
+    this.threshold = options.failureThreshold || TRANSLATION_CONFIG.failureThreshold;
+    this.consecutiveFailures = 0;
+    this.translated = 0;
+    this.failures = 0;
+    this.skipped = 0;
+    this.circuitOpened = false;
+    /** 同一批内的重复内容共用的在途请求 */
+    this.inflight = new Map();
   }
 
   /**
@@ -93,6 +106,9 @@ class TranslationBatcher {
 
   /**
    * 单条翻译（内部方法）
+   *
+   * 失败时返回原文 —— 但连续失败到阈值就熔断，剩余内容不再尝试。
+   * 翻译端点被限流时，逐个硬试只会把整轮拖慢，而且降级得无声无息。
    */
   async _translateOne(text, targetLang = "zh-CN") {
     // 检查缓存
@@ -107,15 +123,67 @@ class TranslationBatcher {
       return text;
     }
 
+    if (this.circuitOpened) {
+      this.skipped++;
+      return text;
+    }
+
+    // 同一批里可能有重复内容，让它们共用一次请求
+    const inflightKey = `${targetLang}:${text}`;
+    const inflight = this.inflight.get(inflightKey);
+    if (inflight) {
+      return inflight;
+    }
+
+    const promise = this._requestTranslation(text, targetLang).finally(() => {
+      this.inflight.delete(inflightKey);
+    });
+    this.inflight.set(inflightKey, promise);
+    return promise;
+  }
+
+  /**
+   * 真正发起翻译请求
+   * @private
+   */
+  async _requestTranslation(text, targetLang) {
     try {
-      const result = await translate(text, { to: targetLang });
+      const result = await this.translateFn(text, { to: targetLang });
       const translated = result?.text || text;
       this.cache.set(text, translated, targetLang);
+
+      this.translated++;
+      this.consecutiveFailures = 0;
       return translated;
     } catch (error) {
-      console.error(`Translation error: ${error.message}`);
+      this.failures++;
+      this.consecutiveFailures++;
+
+      if (this.consecutiveFailures >= this.threshold && !this.circuitOpened) {
+        this.circuitOpened = true;
+        console.warn(
+          `翻译连续失败 ${this.threshold} 次，本次运行剩余内容不再翻译（保留原文）: ${error.message}`
+        );
+      } else if (!this.circuitOpened) {
+        console.warn(`Translation error: ${error.message}`);
+      }
+
       return text; // 失败时返回原文
     }
+  }
+
+  /**
+   * 本次运行的翻译统计
+   * @returns {{translated: number, failures: number, skipped: number, circuitOpened: boolean, attempted: number}}
+   */
+  getStats() {
+    return {
+      translated: this.translated,
+      failures: this.failures,
+      skipped: this.skipped,
+      circuitOpened: this.circuitOpened,
+      attempted: this.translated + this.failures,
+    };
   }
 
   /**
@@ -148,31 +216,36 @@ class TranslationBatcher {
       return items;
     }
 
-    // 默认：直接翻译字符串数组
-    if (typeof getTextFn !== "function") {
-      getTextFn = (item) => item;
-    }
-    if (typeof setTextFn !== "function") {
-      setTextFn = (item, translated) => translated;
-    }
+    const getText = typeof getTextFn === "function" ? getTextFn : (item) => item;
+    // 字符串数组没有字段可写，默认按下标写回 —— 原来的默认实现只是返回，
+    // 译文算出来了却被丢掉，等于整批翻译白做
+    const setText =
+      typeof setTextFn === "function"
+        ? setTextFn
+        : (item, translated, index) => {
+            items[index] = translated;
+          };
 
-    // 分批处理
-    const batches = this._chunk(items, this.concurrency);
+    // 分批处理（分的是下标，这样默认写回也能定位到原数组）
+    const batches = this._chunk(
+      Array.from({ length: items.length }, (_, index) => index),
+      this.concurrency
+    );
 
-    for (const batch of batches) {
+    for (let b = 0; b < batches.length; b++) {
       // 批内并行翻译
       await Promise.all(
-        batch.map(async (item) => {
-          const text = getTextFn(item);
+        batches[b].map(async (index) => {
+          const text = getText(items[index]);
           if (!text) return;
 
           const translated = await this._translateOne(text, targetLang);
-          setTextFn(item, translated);
+          setText(items[index], translated, index);
         })
       );
 
       // 批次间延迟（避免触发限流）
-      if (this.delay > 0 && batches.indexOf(batch) < batches.length - 1) {
+      if (this.delay > 0 && b < batches.length - 1) {
         await this._sleep(this.delay);
       }
     }
