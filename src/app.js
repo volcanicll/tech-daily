@@ -25,6 +25,14 @@ async function run() {
     const enabledServices = getEnabledNotifications();
     console.log("启用的通知服务:", enabledServices.join(", ") || "无");
 
+    // DRY_RUN：只走生成、落盘、发布流程，不真的发消息。
+    // 用于验证改动，避免每验证一次就往群里发一条。
+    if (process.env.DRY_RUN === "true") {
+      console.log("🧪 DRY_RUN 已开启：跳过所有通知渠道的发送");
+      console.log("执行完成！");
+      return;
+    }
+
     const notifications = [];
     let failedDeliveries = 0;
 
