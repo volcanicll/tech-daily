@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TechDaily 归档</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #eef1f5;
+    --card: #fff;
+    --text: #1f2329;
+    --muted: #6b7280;
+    --line: #e5e6eb;
+    --link: #1a6fe0;
+    --chip: #f2f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --card: #212225;
+      --text: #e8eaed;
+      --muted: #9aa0aa;
+      --line: #35373b;
+      --link: #6aa8f5;
+      --chip: #2c2e32;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 16px 64px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.7 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0; }
+
+  .search {
+    width: 100%;
+    margin: 18px 0 8px;
+    padding: 10px 14px;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  .search:focus { outline: 2px solid var(--link); outline-offset: 1px; }
+  .count { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+
+  ul { list-style: none; padding: 0; margin: 0; }
+  li {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .date {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--link);
+    text-decoration: none;
+  }
+  .date:hover { text-decoration: underline; }
+  .meta { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .highlights { margin: 8px 0 0; padding: 0; list-style: none; }
+  .highlights li {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    padding: 2px 0 2px 14px;
+    margin: 0;
+    position: relative;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .highlights li::before {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 12px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--line);
+  }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>TechDaily 归档</h1>
+    <p class="sub">每日科技资讯日报 · 由 GitHub Actions 自动生成</p>
+  </header>
+
+  <input id="q" class="search" type="search" placeholder="搜索日期或头条关键词…" autocomplete="off" aria-label="搜索归档">
+  <p class="count" id="count"></p>
+  <ul id="list"></ul>
+  <p class="empty" id="empty" hidden>没有匹配的日报</p>
+</div>
+
+<script>
+(function () {
+  var listEl = document.getElementById("list");
+  var countEl = document.getElementById("count");
+  var emptyEl = document.getElementById("empty");
+  var queryEl = document.getElementById("q");
+  var entries = [];
+
+  function matches(entry, query) {
+    if (!query) return true;
+    if (entry.date.indexOf(query) !== -1) return true;
+    return (entry.highlights || []).some(function (title) {
+      return title.toLowerCase().indexOf(query) !== -1;
+    });
+  }
+
+  function render() {
+    var query = queryEl.value.trim().toLowerCase();
+    var visible = entries.filter(function (entry) { return matches(entry, query); });
+
+    listEl.innerHTML = "";
+    visible.forEach(function (entry) {
+      var li = document.createElement("li");
+
+      var a = document.createElement("a");
+      a.className = "date";
+      a.href = "archive/" + entry.date + ".html";
+      a.textContent = entry.date;
+      li.appendChild(a);
+
+      if (entry.total) {
+        var meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = "数据源 " + entry.ok + "/" + entry.total;
+        li.appendChild(meta);
+      }
+
+      if (entry.highlights && entry.highlights.length) {
+        var ul = document.createElement("ul");
+        ul.className = "highlights";
+        entry.highlights.slice(0, 3).forEach(function (title) {
+          var item = document.createElement("li");
+          // 标题来自归档数据，用 textContent 而不是 innerHTML
+          item.textContent = title;
+          ul.appendChild(item);
+        });
+        li.appendChild(ul);
+      }
+
+      listEl.appendChild(li);
+    });
+
+    countEl.textContent = query
+      ? visible.length + " / " + entries.length + " 天"
+      : entries.length + " 天";
+    emptyEl.hidden = visible.length > 0;
+  }
+
+  fetch("archive/index.json", { cache: "no-cache" })
+    .then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    })
+    .then(function (data) {
+      entries = data.entries || [];
+      render();
+    })
+    .catch(function (error) {
+      // 首次开启归档时还没有 index.json，这不是错误，说清楚就行
+      countEl.textContent =
+        "还没有归档数据 —— 在 config/daily.json 中把 archive 设为 true，之后每天的日报都会出现在这里。";
+      emptyEl.hidden = true;
+      console.warn("归档索引加载失败:", error);
+    });
+
+  queryEl.addEventListener("input", render);
+})();
+</script>
+</body>
+</html>
